@@ -15,6 +15,7 @@
 #include "app_config.h"
 #include "system/includes.h"
 
+#define CONFIG_RELEASE_ENABLE   1
 
 ///打印是否时间打印信息
 const int config_printf_time         = 1;

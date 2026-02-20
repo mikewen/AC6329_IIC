@@ -5,7 +5,7 @@
 
 #ifdef CONFIG_BOARD_AC632N_DEMO
 
-#define CONFIG_SDFILE_ENABLE
+//#define CONFIG_SDFILE_ENABLE
 
 //*********************************************************************************//
 //                                 配置开始                                        //
@@ -22,14 +22,15 @@
 //                                 UART配置                                        //
 //*********************************************************************************//
 #define TCFG_UART0_ENABLE					ENABLE_THIS_MOUDLE                     //串口打印模块使能
-#define TCFG_UART0_RX_PORT					NO_CONFIG_PORT                         //串口接收脚配置（用于打印可以选择NO_CONFIG_PORT）
-#define TCFG_UART0_TX_PORT  				IO_PORTA_00                            //串口发送脚配置
-#define TCFG_UART0_BAUDRATE  				1000000                                //串口波特率配置
+#define TCFG_UART0_RX_PORT					IO_PORTB_07                         //串口接收脚配置（用于打印可以选择NO_CONFIG_PORT）
+#define TCFG_UART0_TX_PORT  				IO_PORTB_06                            //串口发送脚配置
+#define TCFG_UART0_BAUDRATE  				115200                                //串口波特率配置
 
-#define UART_DB_TX_PIN                      IO_PORTA_01                            //AT_CHART串口
-#define UART_DB_RX_PIN                      IO_PORTA_02
-#define UART_DB_RTS_PIN                     IO_PORTA_06
-#define UART_DB_CTS_PIN                     IO_PORTA_05
+#define UART_DB_TX_PIN                      IO_PORTB_06                            //AT_CHART串口
+#define UART_DB_RX_PIN                      IO_PORTB_07
+
+
+
 
 //*********************************************************************************//
 //                                 USB 配置                                        //
@@ -40,7 +41,8 @@
 #define TCFG_ADB_ENABLE                     DISABLE_THIS_MOUDLE//ENABLE_THIS_MOUDLE
 #define TCFG_AOA_ENABLE                     DISABLE_THIS_MOUDLE//ENABLE_THIS_MOUDLE
 
-#define TCFG_USB_SLAVE_USER_HID            1
+//#define TCFG_USB_SLAVE_USER_HID            1
+#define TCFG_USB_SLAVE_USER_HID            0
 #define TCFG_OTG_USB_DEV_EN                0// (BIT(0) | BIT(1))//USB0 = BIT(0)  USB1 = BIT(1)
 
 
@@ -66,13 +68,15 @@
   'C': IO_PORTA_07  IO_PORTA_08
   'D': IO_PORTA_05  IO_PORTA_06
  */
-#define TCFG_HW_I2C0_PORTS                  'B'
+//#define TCFG_HW_I2C0_PORTS                  'B'
+#define TCFG_HW_I2C0_PORTS                  'C'
 #define TCFG_HW_I2C0_CLK                    100000                                  //硬件IIC波特率
 
 //*********************************************************************************//
 //                                 硬件SPI 配置                                        //
 //*********************************************************************************//
-#define	TCFG_HW_SPI1_ENABLE		ENABLE_THIS_MOUDLE
+//#define	TCFG_HW_SPI1_ENABLE		ENABLE_THIS_MOUDLE
+#define	TCFG_HW_SPI1_ENABLE		0
 //A组IO:    DI: PB2     DO: PB1     CLK: PB0
 //B组IO:    DI: PC3     DO: PC5     CLK: PC4
 #define TCFG_HW_SPI1_PORT		'A'
@@ -80,7 +84,8 @@
 #define TCFG_HW_SPI1_MODE		SPI_MODE_BIDIR_1BIT
 #define TCFG_HW_SPI1_ROLE		SPI_ROLE_MASTER
 
-#define	TCFG_HW_SPI2_ENABLE		ENABLE_THIS_MOUDLE
+//#define	TCFG_HW_SPI2_ENABLE		ENABLE_THIS_MOUDLE
+#define	TCFG_HW_SPI2_ENABLE		0
 //A组IO:    DI: PB8     DO: PB10    CLK: PB9
 //B组IO:    DI: PA13    DO: DM      CLK: DP
 #define TCFG_HW_SPI2_PORT		'A'
@@ -138,7 +143,8 @@
 //*********************************************************************************//
 //                                 adkey 配置                                      //
 //*********************************************************************************//
-#define TCFG_ADKEY_ENABLE                   ENABLE_THIS_MOUDLE //是否使能AD按键
+//#define TCFG_ADKEY_ENABLE                   ENABLE_THIS_MOUDLE //是否使能AD按键
+#define TCFG_ADKEY_ENABLE                   0
 #define TCFG_ADKEY_PORT                     IO_PORTB_01         //AD按键端口(需要注意选择的IO口是否支持AD功能)
 /*AD通道选择，需要和AD按键的端口相对应:
     AD_CH_PA1    AD_CH_PA3    AD_CH_PA4    AD_CH_PA5
@@ -317,7 +323,9 @@
 //#define TCFG_LOWPOWER_POWER_SEL				PWR_DCDC15
 #define TCFG_LOWPOWER_POWER_SEL				PWR_LDO15                    //电源模式设置，可选DCDC和LDO
 #define TCFG_LOWPOWER_BTOSC_DISABLE			0                            //低功耗模式下BTOSC是否保持
-#define TCFG_LOWPOWER_LOWPOWER_SEL			SLEEP_EN                     //SNIFF状态下芯片是否进入powerdown
+//#define TCFG_LOWPOWER_LOWPOWER_SEL			SLEEP_EN                     //SNIFF状态下芯片是否进入powerdown
+#define TCFG_LOWPOWER_LOWPOWER_SEL			0
+
 /*强VDDIO等级配置,可选：
     VDDIOM_VOL_20V    VDDIOM_VOL_22V    VDDIOM_VOL_24V    VDDIOM_VOL_26V
     VDDIOM_VOL_30V    VDDIOM_VOL_30V    VDDIOM_VOL_32V    VDDIOM_VOL_36V*/
@@ -355,7 +363,8 @@
 //*********************************************************************************//
 #define TCFG_USER_TWS_ENABLE                      0   //tws功能使能
 #define TCFG_USER_BLE_ENABLE                      1   //BLE功能使能,---使能后,请配置TCFG_BLE_DEMO_SELECT选择DEMO例子
-#define TCFG_USER_EDR_ENABLE                      1   //EDR功能使能
+//#define TCFG_USER_EDR_ENABLE                      1   //EDR功能使能
+#define TCFG_USER_EDR_ENABLE                      0
 
 #if TCFG_USER_EDR_ENABLE
 #define USER_SUPPORT_PROFILE_SPP    1

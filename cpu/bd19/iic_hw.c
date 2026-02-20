@@ -4,7 +4,7 @@
 #include "asm/clock.h"
 #include "asm/cpu.h"
 
-#if 0
+// #if 0
 /*
     [[  注意!!!  ]]
     * 适用于带cfg_done的硬件IIC，另一种硬件IIC另作说明
@@ -25,6 +25,23 @@
 /*         .role = IIC_MASTER, */
 /*     }, */
 /* }; */
+
+const struct hw_iic_config hw_iic_cfg[IIC_HW_NUM] = {
+    {
+        // I2C0 (the only one on AC6328)
+        .port     = {IO_PORTA_07, IO_PORTA_08}, // SCL, SDA pins – CHANGE THESE TO MATCH YOUR BOARD
+        .baudrate = 100000,                     // 100 kHz (or 400000 for fast mode)
+        //.baudrate = 200000,
+        .hdrive   = 0,                           // Disable high drive (unless needed)
+        //.io_filter = 1,                          // Enable input filter
+        .io_filter = 0,
+        .io_pu    = 1,                            // Enable internal pull-ups (or 0 if external)
+        //.io_pu    = 0,
+        .role     = IIC_MASTER,                   // We are master
+    },
+};
+
+
 static JL_IIC_TypeDef *const iic_regs[IIC_HW_NUM] = {
     JL_IIC,
 };
@@ -338,4 +355,4 @@ void iic_disable_for_ota()
 {
     JL_IIC->CON0 = 0;
 }
-#endif
+//#endif

@@ -5,6 +5,7 @@
  * 系统打印总开关
  */
 
+#define CONFIG_RELEASE_ENABLE   1
 
 #ifdef CONFIG_RELEASE_ENABLE
 #define LIB_DEBUG    0
@@ -16,7 +17,8 @@
 
 #define CONFIG_DEBUG_ENABLE
 
-#define TCFG_MEDIA_LIB_USE_MALLOC		    1
+//#define TCFG_MEDIA_LIB_USE_MALLOC		    1
+#define TCFG_MEDIA_LIB_USE_MALLOC		    0
 //apps example 选择,只能选1个,要配置对应的board_config.h
 #define CONFIG_APP_SPP_LE                 1 //SPP + LE or LE's client
 #define CONFIG_APP_FTMS                   0 //FTMS

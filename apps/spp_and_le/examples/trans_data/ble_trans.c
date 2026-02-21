@@ -988,6 +988,7 @@ static void trans_send_sensor_data(void)
 }
 */
 
+/*
 static void trans_send_sensor_data(void)
 {
     int ret = -1;
@@ -1030,7 +1031,27 @@ static void trans_send_sensor_data(void)
     // ideally handled by the app_main delay.
     // clr_wdt();
 }
+*/
 
+static void trans_send_sensor_data(u8 *data, u8 len)
+{
+    if (!trans_con_handle)
+        return;
+
+    if (ble_comm_att_check_send(trans_con_handle, len) &&
+        (ble_gatt_server_characteristic_ccc_get(trans_con_handle,
+         ATT_CHARACTERISTIC_ae02_01_CLIENT_CONFIGURATION_HANDLE) == ATT_OP_NOTIFY))
+    {
+        int ret = ble_comm_att_send_data(trans_con_handle,
+                                         ATT_CHARACTERISTIC_ae02_01_VALUE_HANDLE,
+                                         data,
+                                         len,
+                                         ATT_OP_AUTO_READ_CCC);
+        if (ret != 0) {
+            log_info("BLE send busy: %d\n", ret);
+        }
+    }
+}
 
 /*************************************************************************************************/
 /*!
@@ -1044,7 +1065,7 @@ static void trans_send_sensor_data(void)
  */
 /*************************************************************************************************/
 
-//extern readMS;
+extern readMS;
 void bt_ble_init(void)
 {
     log_info("%s\n", __FUNCTION__);
@@ -1057,7 +1078,7 @@ void bt_ble_init(void)
     ble_comm_set_config_name(bt_get_local_name(), 1);
 #endif
 */
-    ble_comm_set_config_name("MMC5603", 0);
+    ble_comm_set_config_name("MMC5603QMI8658", 0);
     trans_con_handle = 0;
     trans_server_init();
 
@@ -1079,10 +1100,9 @@ void bt_ble_init(void)
 
     //wdt_close();
     // Add periodic sensor notification timer, readMS
-    //sys_timer_add(0, trans_send_sensor_data, SENSOR_NOTIFY_INTERVAL_MS);
-    //sys_timer_add(0, trans_send_sensor_data, readMS);
+    sys_timer_add(0, trans_send_sensor_data, readMS);
     //sys_timer_add(0, trans_send_sensor_data, 200); // as long as < readMS
-    sys_s_hi_timer_add(NULL, trans_send_sensor_data, 200); // as long as < readMS
+    //sys_s_hi_timer_add(NULL, trans_send_sensor_data, 100); // as long as < readMS
 
 #if TEST_TRANS_CHANNEL_DATA
     if (TEST_TRANS_TIMER_MS < 10) {

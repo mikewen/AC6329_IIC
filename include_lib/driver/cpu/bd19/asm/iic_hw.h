@@ -148,5 +148,8 @@ int hw_iic_write_buf(hw_iic_dev iic, const void *buf, int len);
  */
 int hw_iic_set_baud(hw_iic_dev iic, u32 baud);
 
+void delay_us_by_nop(u32 usec);
+
+void hw_iic_bus_recover(void);
 #endif
 

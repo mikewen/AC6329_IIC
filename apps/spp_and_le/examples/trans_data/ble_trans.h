@@ -16,4 +16,6 @@ int trans_client_search_remote_stop(u16 conn_handle);
 
 void trans_ios_services_init(void);
 void trans_ios_services_exit(void);
+
+void trans_send_sensor_data(u8 *data, u8 len);
 #endif

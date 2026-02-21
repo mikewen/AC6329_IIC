@@ -15,6 +15,7 @@
 #include "app_power_manage.h"
 #include "asm/charge.h"
 
+#include "examples/trans_data/ble_trans.h"
 
 #if TCFG_KWS_VOICE_RECOGNITION_ENABLE
 #include "jl_kws/jl_kws_api.h"
@@ -135,10 +136,46 @@ void check_power_on_key(void)
 
 int retval = -1;
 
-uint16_t readMS = 200;
+uint16_t readMS = 100;
 // Definition (storage allocated here)
-volatile uint8_t mmc5603_raw[RAW_DATA_LEN];
+//volatile uint8_t mmc5603_raw[RAW_DATA_LEN];
 volatile uint8_t sensor_valid = 0;
+
+/* Global packed BLE packet */
+static u8  ble_pkt[20];
+static u8  ble_seq = 0;
+
+/* MMC5603 decoded values shared between read and pack */
+static int16_t mx_raw, my_raw, mz_raw;
+
+/* Update process_mmc5603_full to save raw values */
+void process_mmc5603_full(uint8_t *raw) {
+    uint16_t ux = ((uint16_t)raw[0] << 8) | raw[1];
+    uint16_t uy = ((uint16_t)raw[2] << 8) | raw[3];
+    uint16_t uz = ((uint16_t)raw[4] << 8) | raw[5];
+    mx_raw = (int16_t)(ux - 32768);
+    my_raw = (int16_t)(uy - 32768);
+    mz_raw = (int16_t)(uz - 32768);
+}
+
+/* Pack all sensor data into BLE packet */
+static void pack_ble_packet(int16_t ax, int16_t ay, int16_t az, int16_t gx, int16_t gy, int16_t gz)
+{
+    ble_pkt[0]  = 0xA1;
+    ble_pkt[1]  = ble_seq++;
+    /* Accel */
+    ble_pkt[2]  = ax & 0xFF;  ble_pkt[3]  = ax >> 8;
+    ble_pkt[4]  = ay & 0xFF;  ble_pkt[5]  = ay >> 8;
+    ble_pkt[6]  = az & 0xFF;  ble_pkt[7]  = az >> 8;
+    /* Gyro */
+    ble_pkt[8]  = gx & 0xFF;  ble_pkt[9]  = gx >> 8;
+    ble_pkt[10] = gy & 0xFF;  ble_pkt[11] = gy >> 8;
+    ble_pkt[12] = gz & 0xFF;  ble_pkt[13] = gz >> 8;
+    /* Mag */
+    ble_pkt[14] = mx_raw & 0xFF;  ble_pkt[15] = mx_raw >> 8;
+    ble_pkt[16] = my_raw & 0xFF;  ble_pkt[17] = my_raw >> 8;
+    ble_pkt[18] = mz_raw & 0xFF;  ble_pkt[19] = mz_raw >> 8;
+}
 
 // Write one byte to a register
 static int mmc5603_write_reg(u8 reg, u8 data) {
@@ -188,11 +225,12 @@ static int mmc5603_read_regs(u8 reg, u8 *buf, int len) {
 static int mmc5603_read_raw(u8 *raw) {
     if (mmc5603_write_reg(MMC5603_REG_CTRL0, MMC5603_CTRL0_TM) != 0)
         return -1;
-    delay_2ms(2);  // Wait for conversion
+    os_time_dly(1); //delay_2ms(2);  // Wait for conversion
     //os_time_dly(1);
     return mmc5603_read_regs(MMC5603_REG_XOUT0, raw, RAW_DATA_LEN);
 }
 
+/*
 void process_mmc5603_full(uint8_t *raw) {
     clr_wdt();
 
@@ -209,232 +247,269 @@ void process_mmc5603_full(uint8_t *raw) {
     clr_wdt();
 
     printf("X:%d Y:%d Z:%d mG \r\n", x_mg, y_mg, z_mg);
+}
+*/
 
-    /*  20 bit read
-    // 1. Reconstruct 20-bit integers (Verified Logic)
-    // X: Bytes 0, 1 + Top 4 bits of Byte 6
-    uint32_t ux = ((uint32_t)raw[0] << 12) | ((uint32_t)raw[1] << 4) | (raw[6] >> 4);
-    // Y: Bytes 2, 3 + Top 4 bits of Byte 7
-    uint32_t uy = ((uint32_t)raw[2] << 12) | ((uint32_t)raw[3] << 4) | (raw[7] >> 4);
-    // Z: Bytes 4, 5 + Top 4 bits of Byte 8
-    uint32_t uz = ((uint32_t)raw[4] << 12) | ((uint32_t)raw[5] << 4) | (raw[8] >> 4);
-    */
+void init_mmc5603(){
+    // 1. Set Bandwidth to BW=01 (~4ms measurement time)
+    mmc5603_write_reg(MMC5603_REG_CTRL1, 0x01);
+    os_time_dly(1);
 
+    // 2. Disable CMM in CTRL2 (Set bit 4 to 0)
+    mmc5603_write_reg(MMC5603_REG_CTRL2, 0x00);
+    os_time_dly(1);
+
+    // 3. Configure CTRL0: Enable Auto Set/Reset (0x20) but keep CMM bits (0x10, 0x80) OFF
+    mmc5603_write_reg(MMC5603_REG_CTRL0, 0x20);
+    os_time_dly(1);
+}
+
+
+u8 read_mmc5603_to_buffer()
+{
+    u8 raw[RAW_DATA_LEN];
+    int ret = mmc5603_read_raw(raw);
+    clr_wdt();
+    if (ret == RAW_DATA_LEN) {
+        sensor_valid = 1;
+        process_mmc5603_full(raw);  /* updates mx_raw/my_raw/mz_raw */
+    } else {
+        sensor_valid = 0;
+        printf("mmc5603 read failed, ret=%d\n", ret);
+    }
+    return sensor_valid;
+}
+
+
+#define QMI8658_ADDR    0x6A
+#define QMI8658_REG_CTRL2      0x03
+#define QMI8658_REG_CTRL3      0x04
+#define QMI8658_REG_CTRL5      0x06
+#define QMI8658_REG_CTRL7      0x08
+
+/* QMI8658 Register Definitions */
+#define QMI8658_REG_WHO_AM_I   0x00
+#define QMI8658_REG_CTRL1      0x02
+#define QMI8658_REG_CTRL2      0x03
+#define QMI8658_REG_CTRL3      0x04
+#define QMI8658_REG_CTRL5      0x06
+#define QMI8658_REG_CTRL7      0x08
+#define QMI8658_REG_AX_L       0x35  /* Accel X low byte */
+#define QMI8658_REG_GX_L       0x3B  /* Gyro  X low byte */
+
+#define QMI8658_WHO_AM_I_VAL   0x05
+#define QMI8658_ADDR           0x6B  /* SDO low  => 0x6A, SDO high => 0x6B */
+
+void qmi8658_write_reg(hw_iic_dev iic, u8 reg, u8 data)
+{
+    hw_iic_start(iic);                                    // start_signal = 0x81
+    hw_iic_tx_byte(iic, (QMI8658_ADDR << 1) | 0);        // kick-starts, sends addr
+    hw_iic_tx_byte(iic, reg);                             // sends reg
+    hw_iic_tx_byte(iic, data);                            // sends data
+    hw_iic_stop(iic);                                     // stop, reset start_signal
+}
+
+static int qmi8658_read_reg(hw_iic_dev iic, u8 reg, u8 *data, int len)
+{
+    hw_iic_stop(iic);   // ensure clean state before every transaction
+    delay_us_by_nop(200);
+
+    /* Write phase */
+    hw_iic_start(iic);                                    // start_signal = 0x81
+    if (!hw_iic_tx_byte(iic, (QMI8658_ADDR << 1) | 0)) {  // ! added
+        printf("[QMI8658] read_reg: addr_w NAK\n");
+        hw_iic_stop(iic);
+        return -1;
+    }
+    hw_iic_tx_byte(iic, reg);
+
+    /* Read phase — second START triggers restart inside tx_byte */
+    hw_iic_start(iic);                                    // start_signal = 0x82
+    hw_iic_tx_byte(iic, (QMI8658_ADDR << 1) | 1);        // triggers iic_restart()
+
+    for (int i = 0; i < len; i++) {
+        u8 ack = (i < len - 1) ? 1 : 0;
+        data[i] = hw_iic_rx_byte(iic, ack);
+    }
+
+    hw_iic_stop(iic);
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Init                                                                 */
+/* ------------------------------------------------------------------ */
+int qmi8658_init(hw_iic_dev iic)
+{
     /*
-    // 2. Convert to signed mG (Offset 524288, Resolution 0.0625)
-    //float x_mg = ((float)ux - 524288.0f) * 0.0625f;
-    //float y_mg = ((float)uy - 524288.0f) * 0.0625f;
-    //float z_mg = ((float)uz - 524288.0f) * 0.0625f;
-    clr_wdt();
+    u8 who_am_i = 0;
+    // --- Who Am I check ---
+    if (qmi8658_read_reg(iic, QMI8658_REG_WHO_AM_I, &who_am_i, 1) != 0) {
+        printf("[QMI8658] init: failed to read WHO_AM_I\n");
+        return -1;
+    }
+    printf("[QMI8658] WHO_AM_I = 0x%02X (expect 0x%02X)\n",
+           who_am_i, QMI8658_WHO_AM_I_VAL);
 
-    // 3. Temperature (Register 0x09 is the 10th byte in the burst)
-    // Formula per [MEMSIC Datasheet](https://memsic.com): Temp = (Raw * 0.8) - 75
-    //uint8_t raw_temp = raw[9];
-    //float temp_c = ((float)raw_temp * 0.8f) - 75.0f;
-
-    // 4. One-line Print (Handling float formatting manually for safety)
-    printf("X:%ld.%02u Y:%ld.%02u Z:%ld.%02u mG \r\n",
-           (long)x_mg, (unsigned int)(uint32_t)(x_mg > 0 ? x_mg * 100 : -x_mg * 100) % 100,
-           (long)y_mg, (unsigned int)(uint32_t)(y_mg > 0 ? y_mg * 100 : -y_mg * 100) % 100,
-           (long)z_mg, (unsigned int)(uint32_t)(z_mg > 0 ? z_mg * 100 : -z_mg * 100) % 100);
+    if (who_am_i != QMI8658_WHO_AM_I_VAL) {
+        printf("[QMI8658] init: WHO_AM_I mismatch, abort\n");
+        return -1;
+    }
     */
 
+    /* --- CTRL1: address auto-increment ON, big-endian OFF --- */
+    qmi8658_write_reg(iic, QMI8658_REG_CTRL1, 0x40);
+    printf("[QMI8658] CTRL1 = 0x40 (addr auto-inc ON)\n");
+
+    /* --- CTRL2: Accel ±8 g, 500 Hz ODR --- */
+    /*   [6:4] aODR = 011 (500 Hz)  [3:1] aFS = 010 (±8 g)           */
+    qmi8658_write_reg(iic, QMI8658_REG_CTRL2, 0x34);
+    printf("[QMI8658] CTRL2 = 0x34 (Accel 500 Hz, ±8 g)\n");
+
+    /* --- CTRL3: Gyro ±512 dps, 500 Hz ODR --- */
+    /*   [6:4] gODR = 011 (500 Hz)  [3:1] gFS = 011 (±512 dps)       */
+    qmi8658_write_reg(iic, QMI8658_REG_CTRL3, 0x36);
+    printf("[QMI8658] CTRL3 = 0x36 (Gyro 500 Hz, ±512 dps)\n");
+
+    /* --- CTRL5: Accel LPF BW/10, Gyro LPF BW/10 --- */
+    qmi8658_write_reg(iic, QMI8658_REG_CTRL5, 0x11);
+    printf("[QMI8658] CTRL5 = 0x11 (LPF enabled)\n");
+
+    /* --- CTRL7: enable Accel + Gyro --- */
+    qmi8658_write_reg(iic, QMI8658_REG_CTRL7, 0x03);
+    printf("[QMI8658] CTRL7 = 0x03 (Accel + Gyro enabled)\n");
+
+    printf("[QMI8658] init OK\n");
+    return 0;
 }
 
-void process_mmc5603_with_temp(uint8_t *raw) {
-    clr_wdt();
+/* ------------------------------------------------------------------ */
+/* Read raw accel + gyro (6 + 6 = 12 bytes burst)                      */
+/* ------------------------------------------------------------------ */
+typedef struct {
+    float ax, ay, az;   /* m/s²  (or g – see scale below) */
+    float gx, gy, gz;   /* dps                              */
+} qmi8658_data_t;
 
-    // 1. Reconstruct 20-bit integers (Verified Logic)
-    // X: Bytes 0, 1 + Top 4 bits of Byte 6
-    uint32_t ux = ((uint32_t)raw[0] << 12) | ((uint32_t)raw[1] << 4) | (raw[6] >> 4);
-    // Y: Bytes 2, 3 + Top 4 bits of Byte 7
-    uint32_t uy = ((uint32_t)raw[2] << 12) | ((uint32_t)raw[3] << 4) | (raw[7] >> 4);
-    // Z: Bytes 4, 5 + Top 4 bits of Byte 8
-    uint32_t uz = ((uint32_t)raw[4] << 12) | ((uint32_t)raw[5] << 4) | (raw[8] >> 4);
+int qmi8658_read(hw_iic_dev iic, qmi8658_data_t *out)
+{
+    u8 raw[12];
 
-    // 2. Convert to signed mG (Offset 524288, Resolution 0.0625)
-    float x_mg = ((float)ux - 524288.0f) * 0.0625f;
-    float y_mg = ((float)uy - 524288.0f) * 0.0625f;
-    float z_mg = ((float)uz - 524288.0f) * 0.0625f;
-    clr_wdt();
+    /* Burst-read 12 bytes starting from AX_L */
+    if (qmi8658_read_reg(iic, QMI8658_REG_AX_L, raw, 12) != 0) {
+        printf("[QMI8658] read: burst read failed\n");
+        return -1;
+    }
 
+    /* Reconstruct signed 16-bit values (little-endian) */
+    int16_t ax_raw = (int16_t)((raw[1]  << 8) | raw[0]);
+    int16_t ay_raw = (int16_t)((raw[3]  << 8) | raw[2]);
+    int16_t az_raw = (int16_t)((raw[5]  << 8) | raw[4]);
+    int16_t gx_raw = (int16_t)((raw[7]  << 8) | raw[6]);
+    int16_t gy_raw = (int16_t)((raw[9]  << 8) | raw[8]);
+    int16_t gz_raw = (int16_t)((raw[11] << 8) | raw[10]);
 
-    uint8_t status = 0;
-    uint8_t raw_t = 0;
-    // 2. Ensure CMM is OFF (Register 0x1D = 0x00)
-    mmc5603_write_reg(0x1D, 0x00);
-    delay_2ms(1);
+    /* Scale factors matching CTRL2/CTRL3 settings above:
+       Accel ±8 g  → 4096 LSB/g
+       Gyro ±512 dps → 64   LSB/dps                       */
+    const float ACCEL_SCALE = 1.0f / 4096.0f;   /* g per LSB  */
+    const float GYRO_SCALE  = 1.0f / 64.0f;     /* dps per LSB */
 
-    // 3. Trigger Temperature ONLY (Register 0x1B = 0x02)
-    mmc5603_write_reg(0x1B, 0x02);
+    out->ax = ax_raw * ACCEL_SCALE;
+    out->ay = ay_raw * ACCEL_SCALE;
+    out->az = az_raw * ACCEL_SCALE;
+    out->gx = gx_raw * GYRO_SCALE;
+    out->gy = gy_raw * GYRO_SCALE;
+    out->gz = gz_raw * GYRO_SCALE;
 
-    // 4. Wait a long time for the first conversion (40ms)
-    delay_2ms(5);
-    clr_wdt();
+    printf("[QMI8658] raw: ax=%d ay=%d az=%d gx=%d gy=%d gz=%d\n",
+       (int)ax_raw, (int)ay_raw, (int)az_raw,
+       (int)gx_raw, (int)gy_raw, (int)gz_raw);
 
-    // 5. Read Status AND Temp
-    mmc5603_read_regs(0x18, &status, 1);
-    mmc5603_read_regs(0x09, &raw_t, 1);
-
-    // 3. Temperature (Register 0x09 is the 10th byte in the burst)
-    // Formula per [MEMSIC Datasheet](https://memsic.com): Temp = (Raw * 0.8) - 75
-    //int temp_c = (int)raw_t - 95;
-    int temp_c = (int)raw_t*0.8 - 75;
-
-    // 4. One-line Print (Handling float formatting manually for safety)
-    printf("X:%ld.%02u Y:%ld.%02u Z:%ld.%02u mG | T:%d C\r\n",
-           (long)x_mg, (unsigned int)(uint32_t)(x_mg > 0 ? x_mg * 100 : -x_mg * 100) % 100,
-           (long)y_mg, (unsigned int)(uint32_t)(y_mg > 0 ? y_mg * 100 : -y_mg * 100) % 100,
-           (long)z_mg, (unsigned int)(uint32_t)(z_mg > 0 ? z_mg * 100 : -z_mg * 100) % 100,
-           temp_c);
-}
-
-
-float test_mmc5603_temp_hard_reset(void) {
-    uint8_t status = 0;
-    uint8_t raw_t = 0;
-
-    // 1. Software Reset the entire chip (Register 0x1C = 0x80)
-    // This clears any stuck CMM or ADC states
-    //mmc5603_write_reg(0x1C, 0x80);
-    //delay_2ms(10); // Wait 20ms for reboot
-    //clr_wdt();
-
-    // 2. Ensure CMM is OFF (Register 0x1D = 0x00)
-    mmc5603_write_reg(0x1D, 0x00);
-    delay_2ms(1);
-
-    // 3. Trigger Temperature ONLY (Register 0x1B = 0x02)
-    mmc5603_write_reg(0x1B, 0x02);
-
-    // 4. Wait a long time for the first conversion (40ms)
-    delay_2ms(5);
-    clr_wdt();
-
-    // 5. Read Status AND Temp
-    mmc5603_read_regs(0x18, &status, 1);
-    mmc5603_read_regs(0x09, &raw_t, 1);
-
-    int temp_c = (int)raw_t - 95;
-    //printf("DEBUG - Status: 0x%02X, Raw Temp: 0x%02X\n", status, raw_t);
-    printf("T:%d C\r\n", temp_c);
-
-    if (raw_t == 0) return -1.0f;
-    return ((float)raw_t * 0.8f) - 75.0f;
+    return 0;
 }
 
 /*
-// ble_multi_profile.h
-extern u16 trans_con_handle;
-#define ATT_CHARACTERISTIC_ae02_01_CLIENT_CONFIGURATION_HANDLE 0x0009
-#define ATT_CHARACTERISTIC_ae02_01_VALUE_HANDLE 0x0008
-//#define ATT_OP_AUTO_READ_CCC = 0
-//#define ATT_OP_NOTIFY = 1
-static void trans_send_sensor_data(void)
+static void sensor_timer_cb(void *priv)
 {
-    // Must have a valid connection
-    if (!trans_con_handle) {
-        return;
-    }
-    // Check if notifications are enabled for characteristic ae02_01
-    if (ble_gatt_server_characteristic_ccc_get(trans_con_handle,
-            ATT_CHARACTERISTIC_ae02_01_CLIENT_CONFIGURATION_HANDLE) != 1) {
-        return;
-    }
-
-    // ble_comm_att_send_data copies the data, so it's safe to pass mmc5603_raw directly
-    int ret = ble_comm_att_send_data(trans_con_handle,
-                                     ATT_CHARACTERISTIC_ae02_01_VALUE_HANDLE,
-                                     (uint8_t *)mmc5603_raw,
-                                     RAW_DATA_LEN,
-                                     0);
-    if (ret) {
-        log_info("sensor notify failed\n");
-    }else{
-        printf("sent");
-    }
-    clr_wdt(); os_time_dly(1);
+    qmi8658_data_t imu;
+    qmi8658_read(i2c_dev, &imu);
+    u8 ret=read_mmc5603_to_buffer();
+    //if(!ret){ printf("failed to read MMC5603"); }
 }
 */
 
 static void sensor_timer_cb(void *priv)
 {
-    u8 raw[RAW_DATA_LEN];
-    int ret = mmc5603_read_raw(raw);   // Your existing read function
-    //int ret = mmc5603_read_raw_CMM(raw);
+    clr_wdt();
 
-    extern void wdt_clear();
-    wdt_clear();    // same as? clr_wdt();
-    if (ret == RAW_DATA_LEN) {
-        memcpy(mmc5603_raw, raw, RAW_DATA_LEN);
-        sensor_valid = 1;
-        //printf("Sensor: %02x %02x %02x...\n", raw[0], raw[1], raw[2]);
-        //printf("RAW: %02X %02X %02X %02X %02X %02X | %02X %02X %02X | TEMP:%02X\r\n", raw[0], raw[1], raw[2], raw[3], raw[4], raw[5], raw[6], raw[7],raw[8], raw[9]);
-        //printf("RAW: %02X %02X %02X %02X %02X %02X | %02X %02X %02X \r\n", raw[0], raw[1], raw[2], raw[3], raw[4], raw[5], raw[6], raw[7],raw[8]);
-        process_mmc5603_full(raw);
-        //test_mmc5603_temp_hard_reset();
-        //process_mmc5603_with_temp(raw);
-    } else {
-        sensor_valid = 0;             // Mark data as stale on error
-        printf("Sensor read failed, ret=%d\n", ret);
-    }
-    // No need to signal anything; data is just updated
+    /* 1. MMC5603 first — slow, triggers measurement */
+    read_mmc5603_to_buffer();  /* updates mx_raw/my_raw/mz_raw */
+
+    /* 2. QMI8658C — fast burst read */
+    u8 raw[12];
+    if (qmi8658_read_reg(i2c_dev, QMI8658_REG_AX_L, raw, 12) != 0)
+        return;
+
+    int16_t ax = (int16_t)((raw[1]  << 8) | raw[0]);
+    int16_t ay = (int16_t)((raw[3]  << 8) | raw[2]);
+    int16_t az = (int16_t)((raw[5]  << 8) | raw[4]);
+    int16_t gx = (int16_t)((raw[7]  << 8) | raw[6]);
+    int16_t gy = (int16_t)((raw[9]  << 8) | raw[8]);
+    int16_t gz = (int16_t)((raw[11] << 8) | raw[10]);
+
+    /* 3. Pack all 9 axes into 20-byte BLE packet */
+    pack_ble_packet(ax, ay, az, gx, gy, gz);
+
+    /* 4. Send only if MMC5603 also succeeded */
+    if (sensor_valid)
+        trans_send_sensor_data(ble_pkt, sizeof(ble_pkt));
 }
 
+/*
+void hw_iic_scan(hw_iic_dev iic)
+{
+    printf("[SCAN] Scanning I2C bus...\n");
+    for (u8 addr = 0x08; addr < 0x78; addr++) {
+        hw_iic_start(iic);
+        u8 ack = hw_iic_tx_byte(iic, addr << 1); // write direction
+        hw_iic_stop(iic);   // ALWAYS stop, whether ACK or NAK
+
+        if (ack) {
+            printf("[SCAN] Found device at 0x%02X\n", addr);
+        }
+        delay_us_by_nop(200); // brief gap between probes
+    }
+    printf("[SCAN] Scan complete\n");
+}
+*/
 
 void app_main()
 {
+    void *timer_handle = NULL;
 
+    //hw_iic_bus_recover();
     retval = hw_iic_init(i2c_dev);
     if (retval != 0) {
         printf("hw_iic_init failed with code %d\n", retval);
         // Optionally, blink an LED or halt
     } else {
         printf("hw_iic_init OK\n");
-        /*
-        // Set Bandwidth to BW=00 (8ms measurement time / ~10Hz LPF)
-        // Register 0x1C bits [1:0] = 00
-        mmc5603_write_reg(MMC5603_REG_CTRL1, 0x00);
-        clr_wdt();os_time_dly(1);
-
-        // Enable Auto Set/Reset: Register 0x1B bit [5] = 1 (Auto_SR_en)
-        // Note: 0x20 is the hex value for bit 5.
-        mmc5603_write_reg(MMC5603_REG_CTRL0, 0x20);
-        clr_wdt();os_time_dly(1);
-        // Set the Data Rate (ODR) Value = frequency in Hz. e.g., 0x0A = 10Hz, 0x64 = 100Hz.
-        mmc5603_write_reg(MMC5603_REG_ODR, 0x0A);
-        clr_wdt();os_time_dly(1);
-
-        // Enable Continuous Measurement Mode (CMM_en)
-        // Set bit 4 of CTRL0 (0x10) AND bit 5 (0x20) for Auto_SR_en as discussed.
-        mmc5603_write_reg(MMC5603_REG_CTRL0, 0x30); // 0x10 | 0x20
-        //mmc5603_write_reg(MMC5603_REG_CTRL0, 0xB0);
-        clr_wdt();os_time_dly(1);
-        // Trigger the start of Continuous Mode
-        // Set bit 4 of CTRL2 (0x10) to '1' to start the internal clock
-        mmc5603_write_reg(MMC5603_REG_CTRL2, 0x10);
-        clr_wdt();os_time_dly(1);
-        */
-        // 1. Set Bandwidth to BW=01 (~4ms measurement time)
-        mmc5603_write_reg(MMC5603_REG_CTRL1, 0x01);
+        //printf("[IIC] CON0=0x%04X BAUD=0x%02X\n", JL_IIC->CON0, JL_IIC->BAUD);
+        init_mmc5603();
+        os_time_dly(1);
+        //hw_iic_scan(i2c_dev);
+        //hw_iic_stop(i2c_dev);   // force-clean start_count and start_pending
+        //delay_us_by_nop(1000);  // 1ms settling
+        qmi8658_init(i2c_dev);
         os_time_dly(1);
 
-        // 2. Disable CMM in CTRL2 (Set bit 4 to 0)
-        mmc5603_write_reg(MMC5603_REG_CTRL2, 0x00);
-        os_time_dly(1);
-
-        // 3. Configure CTRL0: Enable Auto Set/Reset (0x20) but keep CMM bits (0x10, 0x80) OFF
-        mmc5603_write_reg(MMC5603_REG_CTRL0, 0x20);
-        os_time_dly(1);
-    }
-
-    void *timer_handle = NULL;
-    timer_handle = sys_timer_add(NULL, sensor_timer_cb, readMS); // 200 ms period
-    //timer_handle = sys_hi_timer_add(NULL, sensor_timer_cb, readMS); // 200 ms period
-    //timer_handle = sys_timer_add(NULL, sensor_timer_cb, 200); // 20 Hz, 50 ms period
-    if (timer_handle == NULL) {
-        retval = 11;
-        printf("Failed to create sensor timer");
+        timer_handle = sys_timer_add(NULL, sensor_timer_cb, readMS); // 200 ms period
+        //timer_handle = sys_timer_add(NULL, sensor_timer_cb, 100); // 20 Hz, 50 ms period
+        if (timer_handle == NULL) {
+            retval = 11;
+            printf("Failed to create sensor timer");
+        }
     }
 
     struct intent it;

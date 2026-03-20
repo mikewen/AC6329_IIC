@@ -136,7 +136,7 @@ void check_power_on_key(void)
 
 int retval = -1;
 
-uint16_t readMS = 100;
+uint16_t readMS = 20;
 // Definition (storage allocated here)
 //volatile uint8_t mmc5603_raw[RAW_DATA_LEN];
 volatile uint8_t sensor_valid = 0;
@@ -225,8 +225,8 @@ static int mmc5603_read_regs(u8 reg, u8 *buf, int len) {
 static int mmc5603_read_raw(u8 *raw) {
     if (mmc5603_write_reg(MMC5603_REG_CTRL0, MMC5603_CTRL0_TM) != 0)
         return -1;
-    os_time_dly(1); //delay_2ms(2);  // Wait for conversion
-    //os_time_dly(1);
+    //os_time_dly(1); //delay_2ms(2);  // Wait for conversion
+    delay_us_by_nop(2000);
     return mmc5603_read_regs(MMC5603_REG_XOUT0, raw, RAW_DATA_LEN);
 }
 
@@ -262,6 +262,9 @@ void init_mmc5603(){
     // 3. Configure CTRL0: Enable Auto Set/Reset (0x20) but keep CMM bits (0x10, 0x80) OFF
     mmc5603_write_reg(MMC5603_REG_CTRL0, 0x20);
     os_time_dly(1);
+
+    mmc5603_write_reg(MMC5603_REG_CTRL0, 0x08);
+    delay_2ms(1);
 }
 
 

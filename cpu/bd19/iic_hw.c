@@ -29,12 +29,13 @@
 const struct hw_iic_config hw_iic_cfg[IIC_HW_NUM] = {
     {
         // I2C0 (the only one on AC6328)
-        .port     = {IO_PORTA_07, IO_PORTA_08}, // SCL, SDA pins – CHANGE THESE TO MATCH YOUR BOARD
+        .port     = {IO_PORT_DP, IO_PORT_DM}, // // AC6328 SCL, SDA pins
+        //.port     = {IO_PORTA_07, IO_PORTA_08}, // SCL, SDA pins – CHANGE THESE TO MATCH YOUR BOARD
         .baudrate = 100000,                     // 100 kHz (or 400000 for fast mode)
         //.baudrate = 200000,
         .hdrive   = 0,                           // Disable high drive (unless needed)
-        //.io_filter = 1,                          // Enable input filter
-        .io_filter = 0,
+        .io_filter = 1,                          // Enable input filter
+        //.io_filter = 0,
         .io_pu    = 1,                            // Enable internal pull-ups (or 0 if external)
         //.io_pu    = 0,
         .role     = IIC_MASTER,                   // We are master

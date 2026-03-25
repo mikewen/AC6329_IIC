@@ -442,32 +442,52 @@ static void sensor_timer_cb(void *priv)
 }
 */
 
-static void sensor_timer_cb(void *priv)
-{
+#define MMC5603 1
+#define QMI8658 0
+
+static void sensor_timer_cb(void *priv){
     clr_wdt();
 
-    /* 1. MMC5603 first — slow, triggers measurement */
-    read_mmc5603_to_buffer();  /* updates mx_raw/my_raw/mz_raw */
+    int16_t ax = 0, ay = 0, az = 0;
+    int16_t gx = 0, gy = 0, gz = 0;
 
+#if MMC5603
+    /* 1. MMC5603 — slow, triggers measurement */
+    read_mmc5603_to_buffer();  /* updates mx_raw/my_raw/mz_raw */
+#else
+    /* Ensure deterministic output when disabled */
+    mx_raw = 0;
+    my_raw = 0;
+    mz_raw = 0;
+#endif
+
+#if QMI8658
     /* 2. QMI8658C — fast burst read */
     u8 raw[12];
-    if (qmi8658_read_reg(i2c_dev, QMI8658_REG_AX_L, raw, 12) != 0)
-        return;
+    if (qmi8658_read_reg(i2c_dev, QMI8658_REG_AX_L, raw, 12) == 0) {
+        ax = (int16_t)((raw[1]  << 8) | raw[0]);
+        ay = (int16_t)((raw[3]  << 8) | raw[2]);
+        az = (int16_t)((raw[5]  << 8) | raw[4]);
+        gx = (int16_t)((raw[7]  << 8) | raw[6]);
+        gy = (int16_t)((raw[9]  << 8) | raw[8]);
+        gz = (int16_t)((raw[11] << 8) | raw[10]);
+    }
+    /* else: keep zeros */
+#endif
 
-    int16_t ax = (int16_t)((raw[1]  << 8) | raw[0]);
-    int16_t ay = (int16_t)((raw[3]  << 8) | raw[2]);
-    int16_t az = (int16_t)((raw[5]  << 8) | raw[4]);
-    int16_t gx = (int16_t)((raw[7]  << 8) | raw[6]);
-    int16_t gy = (int16_t)((raw[9]  << 8) | raw[8]);
-    int16_t gz = (int16_t)((raw[11] << 8) | raw[10]);
-
-    /* 3. Pack all 9 axes into 20-byte BLE packet */
+    /* 3. Pack IMU (zeros if disabled) */
     pack_ble_packet(ax, ay, az, gx, gy, gz);
 
-    /* 4. Send only if MMC5603 also succeeded */
+    /* 4. Send only if MMC5603 is enabled AND valid */
+#if MMC5603
     if (sensor_valid)
         trans_send_sensor_data(ble_pkt, sizeof(ble_pkt));
+#else
+    /* If no magnetometer, always send */
+    trans_send_sensor_data(ble_pkt, sizeof(ble_pkt));
+#endif
 }
+
 
 /*
 void hw_iic_scan(hw_iic_dev iic)
@@ -487,9 +507,19 @@ void hw_iic_scan(hw_iic_dev iic)
 }
 */
 
+void initUSB(){
+    usb_iomode(1);
+    gpio_set_dieh(IO_PORT_DM, 0);gpio_set_die(IO_PORT_DM, 1);gpio_set_pull_down(IO_PORT_DM, 0);gpio_set_pull_up(IO_PORT_DM, 0);
+    gpio_set_dieh(IO_PORT_DM, 0);gpio_set_die(IO_PORT_DM, 1);gpio_set_pull_down(IO_PORT_DM, 0);gpio_set_pull_up(IO_PORT_DM, 1);
+    //gpio_set_dieh(IO_PORT_DP, 0);gpio_set_die(IO_PORT_DP, 1);gpio_set_pull_down(IO_PORT_DP, 0);gpio_set_pull_up(IO_PORT_DP, 0);
+    gpio_set_dieh(IO_PORT_DP, 0);gpio_set_die(IO_PORT_DP, 1);gpio_set_pull_down(IO_PORT_DP, 0);gpio_set_pull_up(IO_PORT_DP, 1);
+}
+
 void app_main()
 {
     void *timer_handle = NULL;
+
+    initUSB();  // For AC6328
 
     //hw_iic_bus_recover();
     retval = hw_iic_init(i2c_dev);
@@ -499,14 +529,17 @@ void app_main()
     } else {
         printf("hw_iic_init OK\n");
         //printf("[IIC] CON0=0x%04X BAUD=0x%02X\n", JL_IIC->CON0, JL_IIC->BAUD);
+#if MMC5603
         init_mmc5603();
         os_time_dly(1);
+#endif
         //hw_iic_scan(i2c_dev);
         //hw_iic_stop(i2c_dev);   // force-clean start_count and start_pending
         //delay_us_by_nop(1000);  // 1ms settling
+#if QMI8658
         qmi8658_init(i2c_dev);
         os_time_dly(1);
-
+#endif // QMI8658
         timer_handle = sys_timer_add(NULL, sensor_timer_cb, readMS); // 200 ms period
         //timer_handle = sys_timer_add(NULL, sensor_timer_cb, 100); // 20 Hz, 50 ms period
         if (timer_handle == NULL) {

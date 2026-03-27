@@ -156,6 +156,8 @@ void process_mmc5603_full(uint8_t *raw) {
     mx_raw = (int16_t)(ux - 32768);
     my_raw = (int16_t)(uy - 32768);
     mz_raw = (int16_t)(uz - 32768);
+
+    //printf("X:%d Y:%d Z:%d mG \r\n", mx_raw, my_raw, mz_raw);
 }
 
 /* Pack all sensor data into BLE packet */
@@ -443,7 +445,7 @@ static void sensor_timer_cb(void *priv)
 */
 
 #define MMC5603 1
-#define QMI8658 0
+#define QMI8658 1
 
 static void sensor_timer_cb(void *priv){
     clr_wdt();
@@ -519,7 +521,7 @@ void app_main()
 {
     void *timer_handle = NULL;
 
-    initUSB();  // For AC6328
+    //initUSB();  // For AC6328
 
     //hw_iic_bus_recover();
     retval = hw_iic_init(i2c_dev);

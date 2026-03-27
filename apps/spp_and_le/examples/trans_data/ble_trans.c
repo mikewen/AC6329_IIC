@@ -35,9 +35,9 @@
 
 #if CONFIG_APP_SPP_LE
 
-#define RAW_DATA_LEN    6
-extern volatile uint8_t mmc5603_raw[RAW_DATA_LEN];
-extern volatile uint8_t sensor_valid;
+//#define RAW_DATA_LEN    6
+//extern volatile uint8_t mmc5603_raw[RAW_DATA_LEN];
+//extern volatile uint8_t sensor_valid;
 
 #if LE_DEBUG_PRINT_EN
 #define log_info(x, ...)  printf("[BLE_TRANS]" x " ", ## __VA_ARGS__)
@@ -504,17 +504,32 @@ static uint16_t trans_att_read_callback(hci_con_handle_t connection_handle, uint
     }
     break;
 
-    case ATT_CHARACTERISTIC_ae10_01_VALUE_HANDLE:
-        att_value_len = sizeof(trans_test_read_write_buf);
-        if ((offset >= att_value_len) || (offset + buffer_size) > att_value_len) {
+    case ATT_CHARACTERISTIC_ae10_01_VALUE_HANDLE: {
+        char tmp[16];
+
+        u16 vbat_mv    = adc_get_voltage(AD_CH_VBAT) * 4;
+        u32 uptime_min = (timer_get_ms() / 1000) / 60;
+
+        u16 total_len = (u16)snprintf(tmp, sizeof(tmp),
+                                     "A%uT%u",
+                                     (u32)vbat_mv,
+                                     uptime_min);
+
+        if (offset >= total_len) {
+            att_value_len = 0;
             break;
         }
 
         if (buffer) {
-            memcpy(buffer, &trans_test_read_write_buf[offset], buffer_size);
-            att_value_len = buffer_size;
+            u16 copy_len = total_len - offset;
+            if (copy_len > buffer_size) copy_len = buffer_size;
+            memcpy(buffer, tmp + offset, copy_len);
+            att_value_len = copy_len;
+        } else {
+            att_value_len = total_len;
         }
         break;
+    }
 
     case ATT_CHARACTERISTIC_ae04_01_CLIENT_CONFIGURATION_HANDLE:
     case ATT_CHARACTERISTIC_ae02_01_CLIENT_CONFIGURATION_HANDLE:
@@ -948,90 +963,6 @@ static void timer_trans_flow_test(void)
  *  \note       Called periodically by a timer
  */
 /*************************************************************************************************/
-/*
-static void trans_send_sensor_data(void)
-{
-//    wdt_close();
-    // Must have a valid connection
-    if (!trans_con_handle) {
-        return;
-    }
-    clr_wdt();
-    // Check if notifications are enabled for characteristic ae02_01
-    if (ble_gatt_server_characteristic_ccc_get(trans_con_handle,
-            ATT_CHARACTERISTIC_ae02_01_CLIENT_CONFIGURATION_HANDLE) != ATT_OP_NOTIFY) {
-        return;
-    }
-    clr_wdt();
-
-    // Only send if sensor data is valid
-    if (!sensor_valid) {
-        printf("wait data");
-        return;
-    }else{
-        sensor_valid=0;
-    }
-
-    // ble_comm_att_send_data copies the data, so it's safe to pass mmc5603_raw directly
-    int ret = ble_comm_att_send_data(trans_con_handle,
-                                     ATT_CHARACTERISTIC_ae02_01_VALUE_HANDLE,
-                                     (uint8_t *)mmc5603_raw,
-                                     RAW_DATA_LEN,
-                                     ATT_OP_AUTO_READ_CCC);
-    if (ret) {
-        log_info("sensor notify failed\n");
-    }else{
-        printf("sent");
-    }
-    clr_wdt();
-//    wdt_init(WDT_1S);
-}
-*/
-
-/*
-static void trans_send_sensor_data(void)
-{
-    int ret = -1;
-
-    // 1. Connection and Notification Guard
-    if (!trans_con_handle) {
-        return;
-    }
-
-    // 2. Buffer & CCC Check (Borrowed from the test code)
-    // This ensures there is space in the BLE stack AND the phone wants data
-    if (ble_comm_att_check_send(trans_con_handle, RAW_DATA_LEN) &&
-        (ble_gatt_server_characteristic_ccc_get(trans_con_handle,
-         ATT_CHARACTERISTIC_ae02_01_CLIENT_CONFIGURATION_HANDLE) == ATT_OP_NOTIFY))
-    {
-        // 3. Only send if we have fresh data
-        if (!sensor_valid) {
-            // Note: removed printf to prevent WDT issues
-            return;
-        }
-
-        // 4. Attempt to send
-        ret = ble_comm_att_send_data(trans_con_handle,
-                                     ATT_CHARACTERISTIC_ae02_01_VALUE_HANDLE,
-                                     (uint8_t *)mmc5603_raw,
-                                     RAW_DATA_LEN,
-                                     ATT_OP_AUTO_READ_CCC);
-
-        if (ret == 0) {
-            // Success: clear the valid flag so we don't send duplicates
-            sensor_valid = 0;
-            // printf("s"); // Keep prints tiny to avoid UART blocking
-        } else {
-            // Buffer was likely full or stack busy
-            log_info("BLE send busy: %d\n", ret);
-        }
-    }
-
-    // Manual WDT clear only if absolutely necessary;
-    // ideally handled by the app_main delay.
-    // clr_wdt();
-}
-*/
 
 static void trans_send_sensor_data(u8 *data, u8 len)
 {
@@ -1078,7 +1009,8 @@ void bt_ble_init(void)
     ble_comm_set_config_name(bt_get_local_name(), 1);
 #endif
 */
-    ble_comm_set_config_name("MMC5603QMI8658", 0);
+    //ble_comm_set_config_name("MMC5603QMI8658", 0);
+    ble_comm_set_config_name("IMU_PWM", 0);
     trans_con_handle = 0;
     trans_server_init();
 
@@ -1100,7 +1032,7 @@ void bt_ble_init(void)
 
     //wdt_close();
     // Add periodic sensor notification timer, readMS
-    sys_timer_add(0, trans_send_sensor_data, readMS);
+    //sys_timer_add(0, trans_send_sensor_data, readMS);
     //sys_timer_add(0, trans_send_sensor_data, 200); // as long as < readMS
     //sys_s_hi_timer_add(NULL, trans_send_sensor_data, 100); // as long as < readMS
 

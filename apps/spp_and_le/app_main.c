@@ -398,17 +398,21 @@ int qmi8658_init(hw_iic_dev iic)
 
     /* --- CTRL1: address auto-increment ON, big-endian OFF --- */
     qmi8658_write_reg(iic, QMI8658_REG_CTRL1, 0x40);
-    printf("[QMI8658] CTRL1 = 0x40 (addr auto-inc ON)\n");
+    //printf("[QMI8658] CTRL1 = 0x40 (addr auto-inc ON)\n");
 
     /* --- CTRL2: Accel ±8 g, 500 Hz ODR --- */
-    /*   [6:4] aODR = 011 (500 Hz)  [3:1] aFS = 010 (±8 g)           */
-    qmi8658_write_reg(iic, QMI8658_REG_CTRL2, 0x34);
-    printf("[QMI8658] CTRL2 = 0x34 (Accel 500 Hz, ±8 g)\n");
+    /*   [6:4] aFS = 011 (±16 g)  [3:1] aODR = 0100 (500 Hz)           */
+    //qmi8658_write_reg(iic, QMI8658_REG_CTRL2, 0x34);
+    /*   [6:4] aFS = 011 (±16 g)  [3:1] aODR = 0111 (62.5 Hz)           */
+    qmi8658_write_reg(iic, QMI8658_REG_CTRL2, 0x37);    // 125 Hz is enough
+    //printf("[QMI8658] CTRL2 = 0x34 (Accel 500 Hz, ±8 g)\n");
 
     /* --- CTRL3: Gyro ±512 dps, 500 Hz ODR --- */
-    /*   [6:4] gODR = 011 (500 Hz)  [3:1] gFS = 011 (±512 dps)       */
-    qmi8658_write_reg(iic, QMI8658_REG_CTRL3, 0x36);
-    printf("[QMI8658] CTRL3 = 0x36 (Gyro 500 Hz, ±512 dps)\n");
+    /*   [6:4] gFS = 011 (±128 dps)  [3:1] gODR = 0011 (896.8 Hz)       */
+    //qmi8658_write_reg(iic, QMI8658_REG_CTRL3, 0x36);
+    /*   [6:4] gFS = 011 (±128 dps)  [3:1] gODR = 1000 (112.1 Hz)       */
+    qmi8658_write_reg(iic, QMI8658_REG_CTRL3, 0x38);
+    //printf("[QMI8658] CTRL3 = 0x36 (Gyro 500 Hz, ±512 dps)\n");
 
     /* --- CTRL5: Accel LPF BW/10, Gyro LPF BW/10 --- */
     qmi8658_write_reg(iic, QMI8658_REG_CTRL5, 0x11);
@@ -545,7 +549,7 @@ void hw_iic_scan(hw_iic_dev iic)
 
 void initUSB(){
     usb_iomode(1);
-    gpio_set_dieh(IO_PORT_DM, 0);gpio_set_die(IO_PORT_DM, 1);gpio_set_pull_down(IO_PORT_DM, 0);gpio_set_pull_up(IO_PORT_DM, 0);
+    //gpio_set_dieh(IO_PORT_DM, 0);gpio_set_die(IO_PORT_DM, 1);gpio_set_pull_down(IO_PORT_DM, 0);gpio_set_pull_up(IO_PORT_DM, 0);
     gpio_set_dieh(IO_PORT_DM, 0);gpio_set_die(IO_PORT_DM, 1);gpio_set_pull_down(IO_PORT_DM, 0);gpio_set_pull_up(IO_PORT_DM, 1);
     //gpio_set_dieh(IO_PORT_DP, 0);gpio_set_die(IO_PORT_DP, 1);gpio_set_pull_down(IO_PORT_DP, 0);gpio_set_pull_up(IO_PORT_DP, 0);
     gpio_set_dieh(IO_PORT_DP, 0);gpio_set_die(IO_PORT_DP, 1);gpio_set_pull_down(IO_PORT_DP, 0);gpio_set_pull_up(IO_PORT_DP, 1);
